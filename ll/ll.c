@@ -7,28 +7,46 @@
 
 #include "ll.h"
 #include <stdlib.h>
-#include <stdint.h>
+#include <string.h>
 
-/**
- * @brief Return code enumeration
- */
-typedef enum ret_code
-{
-	RET_FAIL = -1,
-	RET_OK
-} ret_code_t;
+
 
 /**
  * @brief Initialize a new list
  * @param self Pointer to list pointer to initialize
  * @return RET_OK on success, RET_FAIL on allocation failure
  */
-int8_t ll_list_init(ll_list_t **self)
+int8_t ll_list_init(struct ll_list *self)
 {
 	if (!self) return RET_FAIL;
-	ll_list_t *list = (ll_list_t*)calloc(1, sizeof(ll_list_t));
-	if (!list) return RET_FAIL;
-	*self = list;
+	memset(self, 0, sizeof(*self));
+
+	return RET_OK;
+}
+
+/**
+ * @brief Deinitialize a list object.
+ * @param self Pointer to list object
+ * @return RET_OK on success, RET_FAIL if self is NULL
+ * Frees all nodes in the list but NOT the list itself.
+ * List memory is owned by caller (might be embedded/stack).
+ */
+
+int8_t ll_list_deinit(struct ll_list *self)
+{
+	if (!self) return RET_FAIL;
+	struct ll_node *curr_node = self->head;
+	while (curr_node)
+	{
+		struct ll_node *next  = curr_node->next;
+		free(curr_node);
+		curr_node = next;
+	}
+
+	self->head = NULL;
+	self->tail = NULL;
+	self->size = 0;
+	
 	return RET_OK;
 }
 
@@ -38,40 +56,46 @@ int8_t ll_list_init(ll_list_t **self)
  * @param list Pointer to list this node belongs to
  * @return 0 on success, -1 on failure
  */
-int8_t ll_node_new(ll_node_t **self, ll_list_t *list)
+int8_t ll_node_init(struct ll_node *self, struct ll_list *list)
 {
-	if (!self) return RET_FAIL;
-	ll_node_t *node = (ll_node_t*)calloc(1, sizeof(ll_node_t));
-	if (!node) return RET_FAIL;
-	node->list = list;
-	*self = node;
+	if (!self || !list) return RET_FAIL;
+	memset(self, 0, sizeof(*self));
+	
+	self->list = list;
+	self->next = NULL;
+	self->prev = NULL;
+
 	return RET_OK;
 }
 
 /**
- * @brief Append node to tail of its associated list
- * @param self Pointer to node pointer
- * @return RET_OK on success, RET_FAIL if node or list is invalid
- * 
- * If list is empty, node becomes both head and tail.
- * Otherwise, node is linked after current tail.
+ * @brief Append node to tail of list.
+ * @param self Pointer to list object
+ * @param node Pointer to node to append
+ * @return RET_OK on success, RET_FAIL if parameters invalid.
  */
-int8_t ll_node_tail(ll_node_t **self)
+int8_t ll_list_append(struct ll_list *self, struct ll_node *node)
 {
-	if (!self || !(*self)->list) return RET_FAIL;
-	if (!(*self)->list->tail)
+	if (!self || !node) return RET_FAIL;
+	if (node->list != self) return RET_FAIL;
+
+	if (!self->tail)
 	{
-		(*self)->list->tail = *self;
-		(*self)->list->head = *self;
+		self->head = node;
+		self->tail = node;
+		node->next = NULL;
+		node->prev = NULL;
 	}
 	else
 	{
-		(*self)->prev = (*self)->list->tail;
-		(*self)->list->tail->next = *self;
-		(*self)->list->tail = *self;
+		node->prev = self->tail;
+		node->next = NULL;
+		self->tail->next = node;
+	    self->tail = node;
 	}
-	(*self)->list->size++;
-		
+
+	self->size++;
+	
 	return RET_OK;
 }
 
@@ -83,85 +107,64 @@ int8_t ll_node_tail(ll_node_t **self)
  * If list is empty, node becomes both head and tail.
  * Otherwise, node is linked before current head.
  */
-int8_t ll_node_head(ll_node_t **self)
+int8_t ll_list_prepend(struct ll_list *self, struct ll_node *node)
 {
-	if (!self || !(*self)->list) return RET_FAIL;
-	if (!(*self)->list->head)
+	if (!self || !node) return RET_FAIL;
+	if (node->list != self) return RET_FAIL;
+
+	if (!self->head)
 	{
-		(*self)->list->head = *self;
-		(*self)->list->tail = *self;
+		self->head = node;
+		self->tail = node;
+		node->next = NULL;
+		node->prev = NULL;		
 	}
 	else
 	{
-		(*self)->next = (*self)->list->head;
-		(*self)->list->head->prev = *self;
-		(*self)->list->head = *self;
+		node->next = self->head;
+		node->prev = NULL;
+		self->head->prev = node;
+		self->head = node;
 	}
-	(*self)->list->size++;
 
-	return RET_OK;
-}
-
-/**
- * @brief Remove and free a node from its list
- * @param self Pointer to node pointer to delete
- * @return RET_OK on success, RET_FAIL if parameters are invalid
- * 
- * Updates list head/tail pointers and neighboring nodes as needed.
- * Decrements list size and sets pointer to NULL after freeing.
- */
-int8_t ll_node_delete(ll_node_t **self)
-{
-	if (!self || !(*self) || !(*self)->list) return RET_FAIL;
-	if (!(*self)->prev)
-	{
-		(*self)->list->head = (*self)->next;
-	}
-    else
-	{
-		(*self)->prev->next = (*self)->next;
-	}
+	self->size++;
 	
-	if (!(*self)->next)
-	{	
-		(*self)->list->tail = (*self)->prev;
-	}
-	else
-	{	
-		(*self)->next->prev = (*self)->prev;
-	}
-	(*self)->list->size--;
-	free(*self);	
-	*self = NULL;
-
 	return RET_OK;
 }
 
 /**
- * @brief Free entire list and all its nodes
- * @param self Pointer to list pointer to dispose
- * @return RET_OK on success, RET_FAIL if self pointer is NULL
- * 
- * Iterates through all nodes and frees them before freeing the list.
- * Returns RET_OK without error if list is already NULL.
+ * @brief Remove a node from list.
+ * @param self Pointer to list object
+ * @param node Pointer to node to remove
+ * @return RET_OK on success, RET_FAIL if parameters invalid
  */
-int8_t ll_list_dispose(ll_list_t **self)
+int8_t ll_list_remove(struct ll_list *self, struct ll_node *node)
 {
-	if (!self) return RET_FAIL;
-	if (!(*self)) return RET_OK;
-	ll_node_t *node = (*self)->head;
-	while (node)
-	{
-		ll_node_t *next = node->next;
-		free(node);
-		node = next;
-	}
-	free(*self);
-	*self = NULL;
+	if (!self || !node) return RET_FAIL;
+	if (node->list != self) return RET_FAIL;
 
+	if (!node->prev)
+	{
+		self->head = node->next;
+	}
+	else
+	{
+		node->prev->next = node->next;
+	}
+
+	if (!node->next)
+	{
+		self->tail = node->prev;
+	}
+	else
+	{
+		node->next->prev = node->prev;
+	}
+
+	node->next = NULL;
+	node->prev = NULL;
+
+	self->size--;
+	
 	return RET_OK;
 }
-
-
-
-
